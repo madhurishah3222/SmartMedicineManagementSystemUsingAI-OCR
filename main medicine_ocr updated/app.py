@@ -34,7 +34,7 @@ except ImportError:
     logger.warning("openai not available. Install with: pip install openai")
 
 # ─── App & DB Setup ───────────────────────────────────────────────────────────
-app = Flask(__name__)
+app = Flask(__name__, template_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates'))
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///medicine.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.secret_key = 'supersecretkey'  # Needed for session management
