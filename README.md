@@ -83,10 +83,5 @@ main medicine_ocr updated/
   instance/                   # SQLite DB files (ignored)
 ```
 
-## Next Steps
-- Add README badges/screenshots
-- Integrate a real payment gateway (optional)
-- Deploy to a platform (Render/Heroku/railway)
 
-## License
-Specify your preferred license here.
+
