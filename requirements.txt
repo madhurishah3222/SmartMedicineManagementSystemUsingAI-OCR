@@ -1,0 +1,8 @@
+flask
+Flask-SQLAlchemy
+sqlalchemy
+google-cloud-vision
+google-generativeai
+openai
+Pillow
+gunicorn
