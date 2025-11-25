@@ -46,19 +46,23 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 db = SQLAlchemy(app)
 
 # Initialize Google Vision client with error handling
+global_vision_client = None
 try:
-    credentials_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vision-key.json')
-    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
-    logger.info(f"Setting GOOGLE_APPLICATION_CREDENTIALS to: {credentials_path}")
-    
-    if not os.path.exists(credentials_path):
-        raise FileNotFoundError(f"Credentials file not found at: {credentials_path}")
-        
+    env_cred = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+    if env_cred and os.path.exists(env_cred):
+        logger.info(f"Using GOOGLE_APPLICATION_CREDENTIALS from environment: {env_cred}")
+    else:
+        local_cred = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'vision-key.json')
+        if os.path.exists(local_cred):
+            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = local_cred
+            logger.info(f"Using local vision key at: {local_cred}")
+        else:
+            logger.warning("No Google credentials found; OCR features will be disabled.")
+            raise FileNotFoundError("No credentials available")
     global_vision_client = vision.ImageAnnotatorClient()
     logger.info("Successfully initialized Google Cloud Vision client")
 except Exception as e:
-    logger.error(f"Failed to initialize Google Cloud Vision client: {str(e)}")
-    raise
+    logger.warning(f"Google Cloud Vision not initialized: {str(e)}")
 
 class Medicine(db.Model):
     batch_id = db.Column(db.Integer, primary_key=True)
@@ -902,10 +906,11 @@ def ocr_extract_text(image_content):
     # Attempt Google Vision, then fallback
     try:
         image = vision.Image(content=image_content)
-        response = global_vision_client.text_detection(image=image)
-        texts = response.text_annotations
-        if texts:
-            return texts[0].description
+        if global_vision_client:
+            response = global_vision_client.text_detection(image=image)
+            texts = response.text_annotations
+            if texts:
+                return texts[0].description
         logger.warning("Vision OCR returned no text, trying Gemini fallback")
     except Exception as e:
         if is_billing_disabled_error(e):
@@ -1592,9 +1597,10 @@ def extract_medicines_with_chatgpt(image_content):
         
         # First, use Google Vision API to extract text (as fallback)
         image = vision.Image(content=image_content)
-        response = global_vision_client.text_detection(image=image)
-        texts = response.text_annotations
-        
+        texts = []
+        if global_vision_client:
+            response = global_vision_client.text_detection(image=image)
+            texts = response.text_annotations
         if not texts:
             logger.warning("No text detected in prescription image")
             return []
