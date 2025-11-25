@@ -23,43 +23,6 @@ A Flask-based web app for managing medicines, extracting data from prescriptions
 - Google Cloud service account key for Vision API (JSON file)
 - Optionally, Gemini or OpenAI API keys if you enable AI parsing
 
-## Quick Start
-1) Create and activate a virtual environment
-```
-python -m venv venv
-./venv/Scripts/activate  # Windows
-```
-
-2) Install dependencies
-```
-pip install -r "main medicine_ocr updated/requirements.txt"
-```
-
-3) Set up credentials
-- Place your Google service account key file locally (e.g. `vision-key.json`).
-- Do NOT commit this file. It is ignored via `.gitignore`.
-- Set an environment variable so the Vision client can authenticate:
-```
-set GOOGLE_APPLICATION_CREDENTIALS=\full\path\to\vision-key.json   # Windows CMD
-$env:GOOGLE_APPLICATION_CREDENTIALS="C:\\full\\path\\vision-key.json"  # PowerShell
-```
-- Optional AI keys (only if you use those features):
-```
-set GOOGLE_API_KEY=your_gemini_api_key
-set OPENAI_API_KEY=your_openai_api_key
-```
-
-4) Run the app
-```
-cd "main medicine_ocr updated"
-set FLASK_APP=app.py
-flask run
-```
-Open http://127.0.0.1:5000/ in the browser.
-
-## Default Access
-- Owner secret: `1111` (defined in app logic)
-- App secret key: configured in `app.py` for sessions
 
 ## Database
 - SQLite files live under `main medicine_ocr updated/instance` and are ignored by git.
@@ -70,9 +33,6 @@ Open http://127.0.0.1:5000/ in the browser.
 - On confirm, order is created, stock is updated, and an order success page is shown.
 - Payment integrations are placeholders; you can integrate a real gateway (Razorpay/Stripe/PayPal) next.
 
-## Security Notes
-- `.gitignore` excludes `vision-key.json`, DB files, venv, and system artifacts.
-- Never commit credentials. If a key leaks, rotate it immediately in Google Cloud Console.
 
 ## Project Structure (key files)
 ```
