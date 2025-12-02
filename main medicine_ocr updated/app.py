@@ -1,6 +1,7 @@
 from flask import Flask, request, render_template, jsonify, redirect, url_for, session, flash
 from google.cloud import vision
 import re, os
+import sys
 from werkzeug.utils import secure_filename
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta
@@ -10,13 +11,46 @@ import logging
 import base64
 import json
 
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
+
 # Set up logging first
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# API Key Configuration - You can set it here directly as a fallback
-# Or set it as environment variable: export GEMINI_API_KEY="your-key"
-GEMINI_API_KEY_FALLBACK = "AIzaSyBU-35jMZEdequ5R5wsRC-81x4FUFp6aFU"  # Fallback if env var not set
+# Log API key status
+if os.environ.get('GEMINI_API_KEY'):
+    logger.info("✓ Gemini API key loaded from environment")
+else:
+    logger.warning("⚠ No Gemini API key found - will use FREE OCR only")
+
+# Add current directory to Python path for imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
+# Import free OCR module
+try:
+    from free_ocr import extract_medicines_from_prescription_free, EASYOCR_AVAILABLE, PADDLEOCR_AVAILABLE, TESSERACT_AVAILABLE
+    FREE_OCR_AVAILABLE = EASYOCR_AVAILABLE or PADDLEOCR_AVAILABLE or TESSERACT_AVAILABLE
+    logger.info(f"Free OCR module loaded - EasyOCR: {EASYOCR_AVAILABLE}, PaddleOCR: {PADDLEOCR_AVAILABLE}, Tesseract: {TESSERACT_AVAILABLE}")
+except ImportError as e:
+    FREE_OCR_AVAILABLE = False
+    logger.warning(f"Free OCR module not available: {e}")
+
+# Import advanced strip OCR module (Lite version - no OpenCV required)
+try:
+    from advanced_strip_ocr_lite import get_advanced_ocr, process_medicine_strip_image
+    ADVANCED_OCR_AVAILABLE = True
+    logger.info("Advanced Strip OCR (Lite) module loaded successfully")
+except ImportError as e:
+    ADVANCED_OCR_AVAILABLE = False
+    logger.warning(f"Advanced Strip OCR module not available: {e}")
+
+# API Key Configuration
+# Set as environment variable: export GEMINI_API_KEY="your-key"
+# Or use FREE OCR (Tesseract) - no API key needed!
 
 # Try to import AI libraries
 try:
@@ -508,6 +542,10 @@ HEALTH_CONDITIONS = {
 # Regex patterns for extracting information
 PATTERNS = {
     'brand_name': [
+        # NEW: Specific patterns for real medicine strips
+        r"(?i)\b(OLANZAC|OMIZOLE|BIFILAC|BILAC|PARACETAMOL|DOLO|CROCIN|COMBIFLAM)\b",  # Exact matches
+        r"(?i)\b([A-Z][a-z]+(?:zole|zac|lac|flac|pril|olol|pine|mycin|cillin|floxacin))\b",  # Common suffixes
+        r"(?i)\b([A-Z][A-Za-z]+)\s*&\s*([A-Z][A-Za-z]+)\b",  # "Olanzac & Omizole" format
         r"(?i)^([A-Z][a-z]+(?:\s\d{2,4})?)\b", # Covers names like "Evion 400" at the start
         r"(?i)\b([A-Z][a-z\s-]+)\s*(?:Tablet|Capsule|Syrup|Suspension|Injection|Cream|Gel|Ointment|Lotion|Powder|Drops)\b",
         r"(?i)\b([A-Z][a-z\s-]+)\s+\d+(?:mg|mcg|g|ml)\b",
@@ -534,14 +572,23 @@ PATTERNS = {
         r"(?i)(?:One to two capsules thrice daily after)" # Specific for the given example
     ],
     'batch_number': [
+        # NEW: Specific patterns for real strips (E40001, ALA306 formats)
+        r"(?i)\b(?:B\.?\s*No\.?|Batch(?:\s*No\.?)?)\s*[:#-]?\s*([A-Z][0-9]{4,6})\b",  # E40001 format
+        r"(?i)\b(?:B\.?\s*No\.?|Batch(?:\s*No\.?)?)\s*[:#-]?\s*([A-Z]{2,4}[0-9]{2,4})\b",  # ALA306 format
         r"(?i)\b(?:Batch(?:\s*No\.?|\s*Number)?|B\.?\s*No\.?|B\.?\s*N\.?|Lot(?:\s*No\.?|\s*Number)?)\s*[:#-]?\s*([A-Z0-9\-]+)\b"
     ],
     'mfd': [
-        r"(?i)MFG\.?\s*(?:Date)?\s*[:]??\s*(\d{1,2}[./-]\d{2,4}|[A-Za-z]{3}\s*\d{4}|(?:19|20)\d{2})",
+        # NEW: Specific patterns for real strips (MFG. DT. JAN.24, MFD. 10/2023)
+        r"(?i)MFG\.?\s*DT\.?\s*([A-Z]{3}\.?\s*\d{2,4})",  # MFG. DT. JAN.24
+        r"(?i)MFD\.?\s*(\d{1,2}[./-]\d{2,4})",  # MFD. 10/2023
+        r"(?i)MFG\.?\s*(?:Date)?\s*[:]??\s*(\d{1,2}[./-]\d{2,4}|[A-Za-z]{3}\.?\s*\d{4}|(?:19|20)\d{2})",
         r"(?i)(?:Mfd Date|Mfg Date|Manuf\.? Date)\.?\s*[:]??\s*(\d{1,2}[./-]\d{2,4}|[A-Za-z]{3}\s*\d{4}|(?:19|20)\d{2})\b"
     ],
     'expiry': [
-        r"(?i)EXP\.?\s*(?:Date)?\s*[:]??\s*(\d{1,2}[./-]\d{2,4}|[A-Za-z]{3}\s*\d{4}|(?:19|20)\d{2})",
+        # NEW: Specific patterns for real strips (EXP. DT. DEC.26, EXP. 09/2025)
+        r"(?i)EXP\.?\s*DT\.?\s*([A-Z]{3}\.?\s*\d{2,4})",  # EXP. DT. DEC.26
+        r"(?i)EXP\.?\s*(\d{1,2}[./-]\d{2,4})",  # EXP. 09/2025
+        r"(?i)EXP\.?\s*(?:Date)?\s*[:]??\s*(\d{1,2}[./-]\d{2,4}|[A-Za-z]{3}\.?\s*\d{4}|(?:19|20)\d{2})",
         r"(?i)(?:EXP|Exp Date|Expiry Date)\.?\s*[:]??\s*(\d{1,2}[./-]\d{2,4}|(?:19|20)\d{2})\b"
     ],
     'manufacturer': [
@@ -549,6 +596,9 @@ PATTERNS = {
         r"(?i)\b([A-Z][a-z\s&-]+(?:Ltd|Pvt\.? Ltd|Corp|Inc|Pharmaceuticals|Health Ltd|GmbH)?)\b"
     ],
     'mrp': [
+        # NEW: Specific patterns for real strips (M.R.P. Rs. 189.00, M.R.P.Rs.140.00)
+        r"(?i)M\.?R\.?P\.?\s*Rs\.?\s*(\d+(?:\.\d{2})?)",  # M.R.P. Rs. 189.00
+        r"(?i)M\.?R\.?P\.?Rs\.?\s*(\d+(?:\.\d{2})?)",  # M.R.P.Rs.140.00 (no space)
         r"(?i)MRP\s*Rs\.?\s*(\d+(?:\.\d{2})?)", # Specifically for "MRP Rs.78.98"
         r"(?i)(?:MRP|M\.?R\.?P)\.?\s*[:]?\s*(?:Rs\.?|₹)\s*(\d+(?:[.,]\d{2})?)\b", # Generic MRP pattern
         r"(?i)₹(\d+(?:\.\d{2})?)" # Direct rupee symbol match
@@ -844,9 +894,9 @@ def gemini_extract_text(image_content):
             logger.warning("Gemini not available for OCR fallback")
             return None
 
-        gemini_api_key = os.environ.get('GEMINI_API_KEY') or GEMINI_API_KEY_FALLBACK
+        gemini_api_key = os.environ.get('GEMINI_API_KEY')
         if not gemini_api_key:
-            logger.warning("No GEMINI_API_KEY set for OCR fallback")
+            logger.warning("No GEMINI_API_KEY set. Use FREE OCR instead: install Tesseract")
             return None
 
         import google.generativeai as genai
@@ -876,8 +926,37 @@ def gemini_extract_text(image_content):
             return None
 
         prompt = (
-            "Transcribe all visible text from this medicine label image. "
-            "Return plain text only, no extra formatting."
+            "You are reading a medicine strip/blister pack. Read ALL text from the ENTIRE strip, including:\n\n"
+            "1. MEDICINE NAME (CENTER/TOP of strip):\n"
+            "   - Look in the CENTER area with reflective/metallic surface\n"
+            "   - Large text, often in red or black\n"
+            "   - Examples: 'Olanzac & Omizole', 'BIFILAC', 'Dolo-650', 'O2'\n"
+            "   - May have '&' between two medicine names\n"
+            "   - Read carefully even if surface is shiny/reflective\n\n"
+            "2. BATCH NUMBER (BOTTOM area, often in BLUE/PURPLE stamp):\n"
+            "   - Look for 'B.No.' or 'Batch' followed by code\n"
+            "   - Format: E40001, ALA306, AM600/2012 (letters + numbers)\n"
+            "   - Usually alphanumeric, 4-8 characters\n"
+            "   - Often stamped in blue/purple ink\n\n"
+            "3. MANUFACTURING DATE (BOTTOM area):\n"
+            "   - Look for 'MFG. DT.' or 'MFD.' followed by date\n"
+            "   - Format: JAN.24, 10/2023, FEB 2024\n"
+            "   - Month abbreviation or number\n\n"
+            "4. EXPIRY DATE (BOTTOM area):\n"
+            "   - Look for 'EXP. DT.' or 'EXP.' followed by date\n"
+            "   - Format: DEC.26, 09/2025, JAN 2026\n"
+            "   - Month abbreviation or number\n\n"
+            "5. MRP/PRICE (BOTTOM area):\n"
+            "   - Look for 'M.R.P. Rs.' followed by price\n"
+            "   - Format: Rs. 189.00, Rs.140.00\n"
+            "   - Usually 10-999 rupees\n\n"
+            "CRITICAL INSTRUCTIONS:\n"
+            "- Read the MEDICINE NAME from the CENTER/TOP even if surface is reflective\n"
+            "- Read the BATCH NUMBER from the BLUE/PURPLE stamp at bottom\n"
+            "- Return ALL text exactly as it appears, preserving labels\n"
+            "- Don't skip the medicine name - it's the most important!\n"
+            "- Don't confuse batch numbers (E40001) with dates (JAN.24)\n"
+            "- Don't confuse license numbers with MRP"
         )
         try:
             resp = model.generate_content([prompt, image_pil])
@@ -891,43 +970,85 @@ def gemini_extract_text(image_content):
         return None
 
 def ocr_extract_text(image_content):
-    """Prefer Gemini when key is present; otherwise try Vision with Gemini fallback."""
+    """Extract text from image - PRIORITIZE Gemini AI for best accuracy on medicine strips."""
+    
+    # Check if Gemini API key is available
     try:
-        gemini_key_present = bool(os.environ.get('GEMINI_API_KEY') or GEMINI_API_KEY_FALLBACK)
+        gemini_key_present = bool(os.environ.get('GEMINI_API_KEY'))
     except Exception:
         gemini_key_present = False
 
-    # Prefer Gemini when possible to avoid Vision billing errors
+    # Try Gemini API FIRST (best for medicine strips!)
     if GEMINI_AVAILABLE and gemini_key_present:
+        logger.info("Attempting Gemini AI extraction (PRIORITY)...")
         text = gemini_extract_text(image_content)
-        if text:
+        if text and len(text.strip()) > 50:  # Gemini should return substantial text
+            logger.info(f"✓ Gemini AI successful! Extracted {len(text)} characters")
             return text
+        else:
+            logger.warning("Gemini AI returned insufficient text, trying local OCR...")
+    
+    # Try ADVANCED OCR as fallback
+    if ADVANCED_OCR_AVAILABLE:
+        logger.info("Attempting ADVANCED Strip OCR extraction...")
+        try:
+            advanced_ocr = get_advanced_ocr()
+            text = advanced_ocr.extract_text_multiple_methods(image_content)
+            if text and len(text.strip()) > 0:
+                logger.info(f"✓ ADVANCED OCR successful! Extracted {len(text)} characters")
+                return text
+            else:
+                logger.warning("ADVANCED OCR returned empty text, trying standard FREE OCR...")
+        except Exception as e:
+            logger.error(f"ADVANCED OCR failed: {e}")
+            logger.info("Falling back to standard FREE OCR...")
+    
+    # Try standard FREE OCR
+    if FREE_OCR_AVAILABLE:
+        logger.info("Attempting standard FREE OCR extraction...")
+        try:
+            from free_ocr import FreeOCR
+            ocr = FreeOCR()
+            text = ocr.extract_text(image_content)
+            if text and len(text.strip()) > 0:
+                logger.info(f"✓ FREE OCR successful! Extracted {len(text)} characters")
+                return text
+            else:
+                logger.warning("FREE OCR returned empty text, trying Vision API...")
+        except Exception as e:
+            logger.error(f"FREE OCR failed: {e}")
+            logger.info("Falling back to Vision API...")
+    else:
+        logger.warning("FREE OCR not available. Install Tesseract: https://github.com/UB-Mannheim/tesseract/wiki")
 
-    # Attempt Google Vision, then fallback
+    # Try Google Vision as last resort
     try:
-        image = vision.Image(content=image_content)
         if global_vision_client:
+            logger.info("Attempting Google Vision API extraction...")
+            image = vision.Image(content=image_content)
             response = global_vision_client.text_detection(image=image)
             texts = response.text_annotations
             if texts:
+                logger.info("✓ Google Vision successful!")
                 return texts[0].description
-        logger.warning("Vision OCR returned no text, trying Gemini fallback")
+        logger.warning("Vision OCR returned no text")
     except Exception as e:
         if is_billing_disabled_error(e):
-            logger.error("Vision OCR billing disabled. Falling back to Gemini.")
+            logger.error("Vision OCR billing disabled.")
         else:
-            logger.error(f"Vision OCR error: {e}. Falling back to Gemini.")
+            logger.error(f"Vision OCR error: {e}")
 
-    # Fallback to Gemini
-    text = gemini_extract_text(image_content)
-    return text
+    # All methods failed
+    logger.error("❌ All OCR methods failed!")
+    logger.error("To fix: Install Tesseract from https://github.com/UB-Mannheim/tesseract/wiki")
+    return None
 
 def extract_fields_with_gemini_from_text(full_text):
     """Use Gemini to extract structured fields from OCR text. Returns dict or None."""
     try:
         if not GEMINI_AVAILABLE:
             return None
-        gemini_api_key = os.environ.get('GEMINI_API_KEY') or GEMINI_API_KEY_FALLBACK
+        gemini_api_key = os.environ.get('GEMINI_API_KEY')
         if not gemini_api_key:
             return None
         import google.generativeai as genai
@@ -971,7 +1092,7 @@ def extract_fields_with_gemini_from_text(full_text):
         return None
 
 # ─── Routes ──────────────────────────────────────────────────────────────────
-@app.route('/', methods=['GET'])
+@app.route('/', methods=['GET', 'HEAD'])
 def landing_page():
     if 'user_type' in session:
         return redirect(url_for('index'))
@@ -1449,7 +1570,7 @@ def extract_medicines_with_gemini(image_content):
             return None
         
         # Initialize Gemini API - try environment variable first, then fallback
-        gemini_api_key = os.environ.get('GEMINI_API_KEY') or GEMINI_API_KEY_FALLBACK
+        gemini_api_key = os.environ.get('GEMINI_API_KEY')
         if not gemini_api_key:
             logger.warning("GEMINI_API_KEY not found in environment or fallback. Please set it.")
             return None
@@ -1667,14 +1788,32 @@ def extract_medicines_with_chatgpt(image_content):
         return None
 
 def extract_medicines_from_prescription(image_content):
-    """Extract medicines from prescription using available API (Gemini or ChatGPT)"""
+    """Extract medicines from prescription using available methods (Free OCR, Gemini, or ChatGPT)"""
     # Debug logging
-    gemini_key = os.environ.get('GEMINI_API_KEY') or GEMINI_API_KEY_FALLBACK
+    gemini_key = os.environ.get('GEMINI_API_KEY')
     openai_key = os.environ.get('OPENAI_API_KEY')
+    logger.info(f"FREE_OCR_AVAILABLE: {FREE_OCR_AVAILABLE}")
     logger.info(f"GEMINI_AVAILABLE: {GEMINI_AVAILABLE}, GEMINI_API_KEY available: {bool(gemini_key)}")
     logger.info(f"OPENAI_AVAILABLE: {OPENAI_AVAILABLE}, OPENAI_API_KEY available: {bool(openai_key)}")
     
-    # Try Gemini first
+    # Try FREE OCR first (no API costs!)
+    if FREE_OCR_AVAILABLE:
+        logger.info("Attempting to extract medicines with FREE OCR (EasyOCR/PaddleOCR/Tesseract)...")
+        try:
+            # Get known medicine names from database for better matching
+            known_medicines = [med.medicine_name for med in Medicine.query.with_entities(Medicine.medicine_name).distinct().all()]
+            
+            medicines = extract_medicines_from_prescription_free(image_content, known_medicines)
+            if medicines:
+                logger.info(f"Successfully extracted {len(medicines)} medicines with FREE OCR: {medicines}")
+                return medicines
+            else:
+                logger.warning("Free OCR extraction returned empty list - trying AI fallback")
+        except Exception as e:
+            logger.error(f"Exception in Free OCR extraction: {str(e)}", exc_info=True)
+            logger.info("Falling back to AI-based extraction...")
+    
+    # Try Gemini as fallback
     if GEMINI_AVAILABLE:
         if gemini_key:
             logger.info("Attempting to extract medicines with Gemini...")
@@ -1687,8 +1826,6 @@ def extract_medicines_from_prescription(image_content):
                     logger.warning("Gemini extraction returned None - check logs above for error details")
             except Exception as e:
                 logger.error(f"Exception in Gemini extraction: {str(e)}", exc_info=True)
-                # Re-raise to get more context
-                raise
         else:
             logger.warning("Gemini available but no API key found")
     
@@ -1708,16 +1845,17 @@ def extract_medicines_from_prescription(image_content):
         else:
             logger.warning("OpenAI available but no API key found")
     
-    # If both fail, return None to indicate error
-    logger.error("Neither Gemini nor ChatGPT API is configured. Please set GEMINI_API_KEY or OPENAI_API_KEY")
-    logger.error(f"GEMINI_AVAILABLE: {GEMINI_AVAILABLE}, Has key: {bool(gemini_key)}")
-    logger.error(f"OPENAI_AVAILABLE: {OPENAI_AVAILABLE}, Has key: {bool(openai_key)}")
+    # If all methods fail
+    if not FREE_OCR_AVAILABLE:
+        logger.error("No OCR method available! Install free OCR: pip install easyocr paddleocr pytesseract")
+    logger.error("All extraction methods failed or unavailable")
+    logger.error(f"FREE_OCR: {FREE_OCR_AVAILABLE}, GEMINI: {GEMINI_AVAILABLE}, OPENAI: {OPENAI_AVAILABLE}")
     return None
 
 @app.route('/api/test_api_key', methods=['GET'])
 def test_api_key():
     """Test endpoint to check API key configuration"""
-    gemini_key = os.environ.get('GEMINI_API_KEY') or GEMINI_API_KEY_FALLBACK
+    gemini_key = os.environ.get('GEMINI_API_KEY')
     openai_key = os.environ.get('OPENAI_API_KEY')
     
     result = {
@@ -1833,7 +1971,7 @@ def analyze_prescription():
         
         if medicines_list is None:
             # Get more detailed error info
-            gemini_key = os.environ.get('GEMINI_API_KEY') or GEMINI_API_KEY_FALLBACK
+            gemini_key = os.environ.get('GEMINI_API_KEY')
             openai_key = os.environ.get('OPENAI_API_KEY')
             
             # Try a simple test to see what the actual error is
@@ -1904,15 +2042,32 @@ def index():
             return render_template('index.html', error_message="❌ No file selected")
         
         try:
-            # Read and OCR the image
+            # Read and OCR the image - FIX: Store content to avoid buffering issues
             logger.info("Reading image content")
             image_content = file.read()
             if not image_content:
                 logger.error("No content read from file")
                 return render_template('index.html', error_message="❌ Could not read file content")
             
-            logger.info("Performing OCR with Vision->Gemini fallback")
+            # Reset file pointer for potential re-reads (though we use image_content now)
+            file.seek(0)
+            
+            logger.info("Performing OCR with Gemini AI priority")
+            
+            # Extract text using Gemini first (fastest and most accurate)
             full_text = ocr_extract_text(image_content)
+            
+            # Try advanced OCR only if Gemini didn't work
+            advanced_info = None
+            if not full_text or len(full_text.strip()) < 50:
+                if ADVANCED_OCR_AVAILABLE:
+                    try:
+                        logger.info("Gemini returned insufficient text, trying advanced OCR...")
+                        advanced_info = process_medicine_strip_image(image_content)
+                        if advanced_info:
+                            logger.info(f"Advanced OCR extracted: {advanced_info}")
+                    except Exception as e:
+                        logger.error(f"Advanced OCR failed: {e}")
             if not full_text:
                 return render_template(
                     'index.html',
@@ -1925,40 +2080,80 @@ def index():
             
             full_text = normalize_vertical(full_text)
 
-            # Extract fields (regex first)
-            brand = find_first_match(full_text, PATTERNS['brand_name'])
-            dosage = find_first_match(full_text, PATTERNS['dosage'])
-            batch = find_first_match(full_text, PATTERNS['batch_number'])
-            mfd_date = find_first_match(full_text, PATTERNS['mfd'])
-            exp_date = find_first_match(full_text, PATTERNS['expiry'])
-            manufacturer = find_first_match(full_text, PATTERNS['manufacturer'])
-            mrp_str = find_first_match(full_text, PATTERNS['mrp'])
+            # Use advanced OCR results if available, otherwise use regex
+            if advanced_info and isinstance(advanced_info, dict):
+                brand = advanced_info.get('medicine_name') or find_first_match(full_text, PATTERNS['brand_name'])
+                batch = advanced_info.get('batch_number') or find_first_match(full_text, PATTERNS['batch_number'])
+                mfd_date = advanced_info.get('manufacture_date') or find_first_match(full_text, PATTERNS['mfd'])
+                exp_date = advanced_info.get('expiry_date') or find_first_match(full_text, PATTERNS['expiry'])
+                mrp_str = str(advanced_info.get('mrp', '')) if advanced_info.get('mrp') else find_first_match(full_text, PATTERNS['mrp'])
+                dosage = find_first_match(full_text, PATTERNS['dosage'])
+                manufacturer = find_first_match(full_text, PATTERNS['manufacturer'])
+                logger.info(f"Using advanced OCR results: brand={brand}, batch={batch}, mfd={mfd_date}, exp={exp_date}, mrp={mrp_str}")
+            else:
+                # Extract fields (regex first)
+                brand = find_first_match(full_text, PATTERNS['brand_name'])
+                dosage = find_first_match(full_text, PATTERNS['dosage'])
+                batch = find_first_match(full_text, PATTERNS['batch_number'])
+                mfd_date = find_first_match(full_text, PATTERNS['mfd'])
+                exp_date = find_first_match(full_text, PATTERNS['expiry'])
+                manufacturer = find_first_match(full_text, PATTERNS['manufacturer'])
+                mrp_str = find_first_match(full_text, PATTERNS['mrp'])
 
-            # Try Gemini structured extraction and merge
+            # Try Gemini structured extraction and merge (only if advanced OCR didn't find data)
             try:
                 gem_fields = extract_fields_with_gemini_from_text(full_text)
             except Exception:
                 gem_fields = None
             if isinstance(gem_fields, dict):
                 def pick(primary, alt):
-                    return primary if primary and str(primary).strip() else alt
-                brand = pick(gem_fields.get('brand'), brand)
-                dosage = pick(gem_fields.get('dosage'), dosage)
-                candidate_batch = gem_fields.get('batch_number')
-                if candidate_batch and candidate_batch.strip():
-                    # simple plausibility: contains letter+digit and length >=4
-                    import re as _re
-                    if _re.search(r"[A-Za-z]", candidate_batch) and _re.search(r"\d", candidate_batch) and len(candidate_batch.strip()) >= 4:
-                        if not brand or candidate_batch.strip().lower() != str(brand).strip().lower():
-                            batch = candidate_batch.strip()
-                mfd_candidate = gem_fields.get('manufacture_date')
-                if mfd_candidate and str(mfd_candidate).strip():
-                    mfd_date = str(mfd_candidate).strip()
-                exp_candidate = gem_fields.get('expiry_date')
-                if exp_candidate and str(exp_candidate).strip():
-                    exp_date = str(exp_candidate).strip()
-                manufacturer = pick(gem_fields.get('manufacturer'), manufacturer)
-                mrp_str = pick(gem_fields.get('mrp'), mrp_str)
+                    return primary if primary and str(primary).strip() and str(primary).strip() != "Information not available" else alt
+                
+                # Only use Gemini if advanced OCR didn't find it
+                if not brand or brand == "Information not available":
+                    brand = pick(gem_fields.get('brand'), brand)
+                if not dosage or dosage == "Information not available":
+                    dosage = pick(gem_fields.get('dosage'), dosage)
+                
+                # Batch: validate it's not a date (like JAN24)
+                if not batch or batch == "Information not available":
+                    candidate_batch = gem_fields.get('batch_number')
+                    if candidate_batch and candidate_batch.strip():
+                        import re as _re
+                        # Reject if it looks like a date (JAN24, FEB25, etc.)
+                        if not _re.match(r'^(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\d{2}$', candidate_batch.strip().upper()):
+                            if _re.search(r"[A-Za-z]", candidate_batch) and _re.search(r"\d", candidate_batch) and len(candidate_batch.strip()) >= 4:
+                                if not brand or candidate_batch.strip().lower() != str(brand).strip().lower():
+                                    batch = candidate_batch.strip()
+                
+                # Dates: only use if not already found
+                if not mfd_date or mfd_date == "Information not available":
+                    mfd_candidate = gem_fields.get('manufacture_date')
+                    if mfd_candidate and str(mfd_candidate).strip():
+                        mfd_date = str(mfd_candidate).strip()
+                if not exp_date or exp_date == "Information not available":
+                    exp_candidate = gem_fields.get('expiry_date')
+                    if exp_candidate and str(exp_candidate).strip():
+                        exp_date = str(exp_candidate).strip()
+                
+                if not manufacturer or manufacturer == "Information not available":
+                    manufacturer = pick(gem_fields.get('manufacturer'), manufacturer)
+                
+                # MRP: validate it's reasonable (not 158100!)
+                if not mrp_str or mrp_str == "Information not available":
+                    gem_mrp = gem_fields.get('mrp')
+                    if gem_mrp:
+                        try:
+                            import re as _re
+                            # Extract just the number
+                            mrp_match = _re.search(r'([0-9]+\.?[0-9]*)', str(gem_mrp))
+                            if mrp_match:
+                                mrp_val = float(mrp_match.group(1))
+                                # Only accept if reasonable (10-999 Rs)
+                                if 10 <= mrp_val <= 999:
+                                    mrp_str = str(gem_mrp)
+                        except:
+                            pass
 
             logger.info(f"Merged fields: Brand={brand}, Dosage={dosage}, Batch={batch}, MFD={mfd_date}, EXP={exp_date}, Manufacturer={manufacturer}, MRP={mrp_str}")
 
@@ -2302,6 +2497,69 @@ def view_enquiries():
     
     enquiries = MedicineEnquiry.query.order_by(MedicineEnquiry.enquiry_date.desc()).all()
     return render_template('enquiries.html', enquiries=enquiries)
+
+@app.route('/api/process_medicine_strip', methods=['POST'])
+def process_medicine_strip():
+    """Process medicine strip image with advanced OCR for better accuracy"""
+    logger.info("=" * 50)
+    logger.info("MEDICINE STRIP PROCESSING REQUEST")
+    logger.info("=" * 50)
+    
+    if not session.get('logged_in'):
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    try:
+        if 'image' not in request.files:
+            return jsonify({'error': 'No image file provided'}), 400
+        
+        file = request.files['image']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        # FIX: Read image content once and store it to avoid buffering issues
+        image_content = file.read()
+        if not image_content:
+            return jsonify({'error': 'Could not read file content'}), 400
+        
+        # Reset file pointer in case it's needed again
+        file.seek(0)
+        
+        logger.info(f"Processing medicine strip image ({len(image_content)} bytes)")
+        
+        # Use advanced OCR for medicine strips
+        if ADVANCED_OCR_AVAILABLE:
+            try:
+                result = process_medicine_strip_image(image_content)
+                if result and isinstance(result, dict):
+                    logger.info(f"Advanced OCR extracted: {result}")
+                    return jsonify({
+                        'success': True,
+                        'data': result
+                    })
+                else:
+                    logger.warning("Advanced OCR returned no results")
+            except Exception as e:
+                logger.error(f"Advanced OCR failed: {e}")
+        
+        # Fallback to standard OCR
+        logger.info("Falling back to standard OCR...")
+        try:
+            text = ocr_extract_text(image_content)
+            if text and len(text.strip()) > 10:
+                return jsonify({
+                    'success': True,
+                    'data': {
+                        'raw_text': text
+                    }
+                })
+        except Exception as e:
+            logger.error(f"Standard OCR failed: {e}")
+        
+        return jsonify({'error': 'Failed to extract text from image'}), 500
+        
+    except Exception as e:
+        logger.error(f"Error processing medicine strip: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
 
 # ─── Run ───────────────────────────────────────────────────────────────────────
 if __name__ == '__main__':

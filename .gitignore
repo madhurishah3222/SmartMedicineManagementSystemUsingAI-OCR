@@ -1,38 +1,83 @@
+# Environment variables
+.env
+
+# Google Cloud credentials (NEVER UPLOAD!)
+vision-key.json
+**/vision-key.json
+*.json.json
+
 # Python
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyc
-*.pyd
-
-# Environments
+*$py.class
+*.so
+.Python
 venv/
-**/venv/
-.env
-*.env
+env/
+ENV/
 
-# Flask instance folder
+# Flask
 instance/
-**/instance/
+.webassets-cache
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
 
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
 # OS
 .DS_Store
 Thumbs.db
+__MACOSX/
+
+# Uploads
+uploads/*
+!uploads/.gitkeep
 
 # Logs
 *.log
 
-# Databases
-*.sqlite
-*.sqlite3
-*.db
+# Temporary documentation (keep only main docs)
+CRITICAL_FIXES.md
+IMPLEMENTATION_SUMMARY.md
+INSTALL_TESSERACT_NOW.md
+INSTALL_TESSERACT_MANUAL.md
+INSTALL_EASYOCR_NOW.md
+QUICK_START_FREE_OCR.md
+QUICK_START_IMPROVED_OCR.md
+TEST_NOW.md
+TEST_OCR.md
+LATEST_IMPROVEMENTS.md
+IMPROVED_OCR_GUIDE.md
+SOLUTION_QUOTA_EXCEEDED.md
+QUICK_REFERENCE.md
+README_OCR_IMPROVEMENTS.md
+COMPLETE_SETUP_SUCCESS.md
+PATTERN_IMPROVEMENTS.md
+MEDICINE_STRIP_OCR_IMPROVEMENTS.md
+GEMINI_PRIORITY_FIX.md
+SPEED_OPTIMIZATION.md
+FINAL_FIX_SUMMARY.md
+DEBUG_GUIDE.md
+FINAL_STATUS_AND_USAGE.md
+SUCCESS_FREE_OCR_WORKING.md
+FIXED_API_ERROR.md
+README_FREE_OCR.md
+FINAL_SETUP_COMPLETE.md
+FREE_OCR_SETUP.md
+BEFORE_AFTER_COMPARISON.md
+CORRECT_VALUES.md
 
-# Keys / credentials
-vision-key.json
-**/vision-key.json
-*vision-key.json*
-__MACOSX/
+# Test scripts (optional - you can keep these)
+# test_*.py
+# debug_*.py
+
+# PowerShell scripts (optional)
+# *.ps1

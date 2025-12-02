@@ -167,12 +167,7 @@
                                 {% endif %}
                             </a>
                         </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="{{ url_for('chatbot') }}">Chatbot</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="{{ url_for('health_advice_page') }}">Advice</a>
-                        </li>
+
                         <li class="nav-item">
                             <a class="nav-link" href="{{ url_for('medicine_info_page') }}">Medicine Info</a>
                         </li>
@@ -182,12 +177,7 @@
                         <li class="nav-item">
                             <a class="nav-link" href="{{ url_for('upload_prescription_page') }}">Upload Rx</a>
                         </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="{{ url_for('bmi_calculator') }}">BMI Calculator</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="{{ url_for('health_tips') }}">Health Tips</a>
-                        </li>
+
                     {% endif %}
                     {% if session.get('user_type') %}
                         <li class="nav-item">
