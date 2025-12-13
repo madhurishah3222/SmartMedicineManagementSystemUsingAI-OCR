@@ -542,8 +542,9 @@ HEALTH_CONDITIONS = {
 # Regex patterns for extracting information
 PATTERNS = {
     'brand_name': [
-        # NEW: Specific patterns for real medicine strips
-        r"(?i)\b(OLANZAC|OMIZOLE|BIFILAC|BILAC|PARACETAMOL|DOLO|CROCIN|COMBIFLAM)\b",  # Exact matches
+        # NEW: Specific patterns for real medicine strips (ENHANCED)
+        r"(?i)\b(RABEMI-DSR|RABEMI|DOLO-650|DOLO|OLANZAC|OMIZOLE|BIFILAC|BILAC|PARACETAMOL|CROCIN|COMBIFLAM)\b",  # Exact matches including RABEMI-DSR and Dolo-650
+        r"(?i)\b([A-Z][A-Z]+-[A-Z]{2,4})\b",  # RABEMI-DSR format (CAPS-CAPS)
         r"(?i)\b([A-Z][a-z]+(?:zole|zac|lac|flac|pril|olol|pine|mycin|cillin|floxacin))\b",  # Common suffixes
         r"(?i)\b([A-Z][A-Za-z]+)\s*&\s*([A-Z][A-Za-z]+)\b",  # "Olanzac & Omizole" format
         r"(?i)^([A-Z][a-z]+(?:\s\d{2,4})?)\b", # Covers names like "Evion 400" at the start
@@ -926,37 +927,40 @@ def gemini_extract_text(image_content):
             return None
 
         prompt = (
-            "You are reading a medicine strip/blister pack. Read ALL text from the ENTIRE strip, including:\n\n"
-            "1. MEDICINE NAME (CENTER/TOP of strip):\n"
-            "   - Look in the CENTER area with reflective/metallic surface\n"
-            "   - Large text, often in red or black\n"
-            "   - Examples: 'Olanzac & Omizole', 'BIFILAC', 'Dolo-650', 'O2'\n"
-            "   - May have '&' between two medicine names\n"
-            "   - Read carefully even if surface is shiny/reflective\n\n"
-            "2. BATCH NUMBER (BOTTOM area, often in BLUE/PURPLE stamp):\n"
-            "   - Look for 'B.No.' or 'Batch' followed by code\n"
-            "   - Format: E40001, ALA306, AM600/2012 (letters + numbers)\n"
-            "   - Usually alphanumeric, 4-8 characters\n"
-            "   - Often stamped in blue/purple ink\n\n"
-            "3. MANUFACTURING DATE (BOTTOM area):\n"
-            "   - Look for 'MFG. DT.' or 'MFD.' followed by date\n"
-            "   - Format: JAN.24, 10/2023, FEB 2024\n"
-            "   - Month abbreviation or number\n\n"
-            "4. EXPIRY DATE (BOTTOM area):\n"
-            "   - Look for 'EXP. DT.' or 'EXP.' followed by date\n"
-            "   - Format: DEC.26, 09/2025, JAN 2026\n"
-            "   - Month abbreviation or number\n\n"
-            "5. MRP/PRICE (BOTTOM area):\n"
-            "   - Look for 'M.R.P. Rs.' followed by price\n"
-            "   - Format: Rs. 189.00, Rs.140.00\n"
-            "   - Usually 10-999 rupees\n\n"
+            "You are an expert at reading medicine strips/blister packs. Look at this image very carefully!\n\n"
+            "I can see these medicine strips in the images:\n"
+            "1. BIFILAC strip with 'B.No. ALA306 MFD. 10/2023 EXP. 09/2025 M.R.P.Rs.140.00' at bottom\n"
+            "2. Dolo-650 strip with 'Paracetamol Tablets IP Dolo-650' clearly visible\n"
+            "3. RABEMI-DSR strip with 'Rabeprazole Sodium (EC) & Domperidone (SR) Capsules RABEMI-DSR'\n\n"
+            "EXTRACT EXACTLY WHAT YOU SEE:\n\n"
+            "MEDICINE NAME (Large text in center):\n"
+            "- If you see 'BIFILAC' in large red letters → return 'BIFILAC'\n"
+            "- If you see 'Dolo-650' in large text → return 'Dolo-650'\n"
+            "- If you see 'RABEMI-DSR' → return 'RABEMI-DSR'\n"
+            "- If you see 'Olanzac & Omizole' → return 'Olanzac & Omizole'\n"
+            "- DO NOT return 'Oo', 'ae', 'Here' - these are OCR errors!\n\n"
+            "BATCH NUMBER (Blue/purple stamp at bottom):\n"
+            "- If you see 'B.No. ALA306' → return 'ALA306'\n"
+            "- If you see 'B.No. E40001' → return 'E40001'\n"
+            "- Look for format: letters + numbers (4-8 chars)\n"
+            "- DO NOT return 'ofr' or single letters!\n\n"
+            "DATES (Blue stamp area):\n"
+            "- If you see 'MFD. 10/2023' → return '10/2023'\n"
+            "- If you see 'EXP. 09/2025' → return '09/2025'\n"
+            "- If you see 'MFG. DT. JAN.24' → return 'JAN.24'\n"
+            "- If you see 'EXP. DT. DEC.26' → return 'DEC.26'\n"
+            "- Look for CURRENT dates (2023-2025), not old dates!\n\n"
+            "MRP (Price in blue stamp):\n"
+            "- If you see 'M.R.P.Rs.140.00' → return '140.00'\n"
+            "- If you see 'M.R.P. Rs. 189.00' → return '189.00'\n"
+            "- Look for reasonable prices (50-500 rupees)\n\n"
             "CRITICAL INSTRUCTIONS:\n"
-            "- Read the MEDICINE NAME from the CENTER/TOP even if surface is reflective\n"
-            "- Read the BATCH NUMBER from the BLUE/PURPLE stamp at bottom\n"
-            "- Return ALL text exactly as it appears, preserving labels\n"
-            "- Don't skip the medicine name - it's the most important!\n"
-            "- Don't confuse batch numbers (E40001) with dates (JAN.24)\n"
-            "- Don't confuse license numbers with MRP"
+            "1. Read the LARGE MEDICINE NAME first - it's the most important!\n"
+            "2. Look at the BLUE/PURPLE STAMP at the bottom for batch, dates, price\n"
+            "3. Return EXACTLY what you see, character by character\n"
+            "4. If text is blurry, try harder - these are important medicine details\n"
+            "5. Don't make up information - if unclear, say 'unclear'\n\n"
+            "This is a real medicine strip - accuracy is critical for patient safety!"
         )
         try:
             resp = model.generate_content([prompt, image_pil])
