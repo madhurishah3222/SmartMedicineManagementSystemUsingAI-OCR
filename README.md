@@ -37,16 +37,10 @@ python "main medicine_ocr updated/app.py"
 Open: `http://127.0.0.1:5000`
 
 ### 4. Login
+    Seller 
+    Buyer
 
-**Owner Account**:
-- Username: `owner`
-- Password: `owner123`
-
-**User Account**:
-- Username: `user`
-- Password: `user123`
-
-## 📸 Supported Medicine Strips
+## Supported Medicine Strips
 
 Tested and working with:
 - ✅ **Olanzac & Omizole** - E40001, JAN.24, DEC.26, Rs.189.00
@@ -159,17 +153,6 @@ OpenCV is optional. The system works without it using PIL-only preprocessing.
 
 To install: `pip install opencv-python`
 
-### Wrong Medicine Name?
-Add it to the patterns in `app.py`:
-```python
-r"(?i)\b(OLANZAC|OMIZOLE|BIFILAC|YOUR_MEDICINE)\b"
-```
-
-### Batch Number Not Detected?
-Check format matches:
-- E40001 (1 letter + 4-6 digits)
-- ALA306 (2-4 letters + 2-4 digits)
-
 ## 📊 Database Schema
 
 ### Medicine Table
@@ -195,21 +178,6 @@ Check format matches:
 - Use HTTPS in production
 - Validate all user inputs
 
-## 📄 License
-
-[Your License Here]
-
-## 👥 Contributors
-
-[Your Name/Team]
-
-## 📞 Support
-
-For issues or questions:
-- Create an issue on GitHub
-- Email: [your-email]
-
----
 
 ## 🎉 Recent Updates
 
