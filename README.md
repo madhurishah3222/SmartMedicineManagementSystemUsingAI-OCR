@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Medicine OCR System
 
 AI-powered medicine strip OCR system with support for reflective surfaces, embossed text, and challenging image conditions.
@@ -200,3 +201,7 @@ To install: `pip install opencv-python`
 **Status**: ✅ Production Ready
 **Tested With**: Olanzac, Bifilac strips
 **Accuracy**: 100% on tested strips
+=======
+# SmartMedicineManagementSystemUsingAI-OCR
+Smart Medicine Management System is a full-stack  web application that leverages a hybrid AI architecture to streamline pharmacy operations and patient care. It integrates OCR for prescription digitization and a BioBERT-based NER model to extract drug names, dosages, and medical entities with 92.5% accuracy.
+>>>>>>> 38c6d2ef1336bd9933e7f4c42754347102046e88
