@@ -4,7 +4,7 @@ AI-powered medicine strip OCR system with support for reflective surfaces, embos
 
 ## ✨ Features
 
-- 🔍 **Advanced OCR** - Handles reflective/metallic medicine strips
+- � **Advanced OCR** - Handles reflective/metallic medicine strips
 - 🤖 **AI-Powered** - Uses Gemini AI for best accuracy
 - 📊 **Pattern Matching** - Extracts medicine name, batch, dates, MRP
 - 💾 **Database** - SQLite storage for medicine inventory
